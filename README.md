@@ -141,6 +141,17 @@ At nontrivial design decisions, the UI surfaces the agent's deliberation. Exampl
 
 This is not optional polish. It is the mechanism by which users learn that AI reasoning is a process they can participate in — not an oracle to be accepted or rejected wholesale.
 
+#### 4.2.1 Congress Mode In Practice (Build Example)
+
+In live implementation work, a collaborator flagged that audit reframing could be perceived as user correction instead of user advocacy. That perspective changed the product contract itself, not just UI copy: the audit payload now includes empowering framing ("here is what I asked on your behalf") and neutral merge framing ("two bids, choose or blend").
+
+This is a concrete Congress Moment: a human perspective surfaced a risk (ego-threat UX), the system design absorbed the critique, and the output became stronger for both outcomes we care about:
+
+- better software behavior (clearer merge decisions and safer adoption language),
+- better human experience (users feel represented, not judged).
+
+When this pattern repeats, Mojo-Dojo's core thesis is no longer abstract; it is demonstrated through product behavior.
+
 ### 4.3 Ethics Layer (Structural, Not Decorative)
 
 At least one scenario per module involves a genuine ethical trade-off: data collection design, user profiling, in-app nudging, privacy vs. utility. When this scenario appears, the Reasoning agent does not simply implement the most expedient version. It walks the user through consequences and asks for an explicit decision. This is where users learn that ethical constraints are a design lens, not a handcuff.

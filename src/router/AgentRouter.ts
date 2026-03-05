@@ -20,14 +20,15 @@ export class AgentRouter {
   ): Promise<RouterResult> {
     const byTag: RouterResult["byTag"] = {};
 
-    for (const tag of classification.tags) {
+    const tagJobs = classification.tags.map(async (tag) => {
       const agents = this.registry[tag] ?? [];
       if (agents.length === 0) {
         byTag[tag] = [];
-        continue;
+        return;
       }
 
-      const results = await Promise.all(
+      // Isolate failures so one provider error does not collapse the whole tag.
+      const settled = await Promise.allSettled(
         agents.map((agent) =>
           agent.handle({
             tag,
@@ -37,8 +38,25 @@ export class AgentRouter {
         ),
       );
 
-      byTag[tag] = results;
-    }
+      byTag[tag] = settled.map((result, index) => {
+        if (result.status === "fulfilled") {
+          return result.value;
+        }
+
+        const failedAgent = agents[index];
+        return {
+          agentId: failedAgent?.id ?? `${tag}.unknown`,
+          tag,
+          content: `[error] agent failed: ${result.reason instanceof Error ? result.reason.message : "unknown error"}`,
+          metadata: {
+            error: true,
+            provider: failedAgent?.modelName ?? "unknown",
+          },
+        };
+      });
+    });
+
+    await Promise.all(tagJobs);
 
     return {
       classification,

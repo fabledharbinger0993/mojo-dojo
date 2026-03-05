@@ -1,0 +1,20 @@
+{
+  "name": "error-handling-and-tests",
+  "description": "Audit should favor stronger explicit validation and test cues.",
+  "input": {
+    "userPrompt": "Refactor this API handler and make it production-safe.",
+    "baselineLabel": "user.primary.agent",
+    "baselineOutput": "Here is a quick refactor. It should work."
+  },
+  "expected": {
+    "method": "rubric-plus-narrative",
+    "winnerLabel": "mojo.audit.second-opinion",
+    "mustMention": [
+      "ranked higher",
+      "risk"
+    ],
+    "considerationsMustInclude": [
+      "fallback"
+    ]
+  }
+}

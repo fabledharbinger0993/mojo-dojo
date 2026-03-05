@@ -1,0 +1,21 @@
+{
+  "name": "style-fit-preference",
+  "description": "When style hints favor snake_case, baseline may win style-fit even if audit wins other criteria.",
+  "input": {
+    "userPrompt": "Implement a parser module.",
+    "baselineLabel": "user.primary.agent",
+    "baselineOutput": "function parse_input_value(raw_input) { return raw_input; }",
+    "context": {
+      "styleGuide": "Prefer snake_case naming and minimal semicolons."
+    }
+  },
+  "expected": {
+    "method": "rubric-plus-narrative",
+    "mustMention": [
+      "baseline ranked higher on"
+    ],
+    "considerationsMustInclude": [
+      "fallback"
+    ]
+  }
+}
