@@ -1,0 +1,22 @@
+{
+  "kind": "stance-policy",
+  "name": "stance-policy-diff-unavailable-without-baseline",
+  "description": "When baseline code is missing, diffAvailable should be false across stances and the panel should avoid rendering broken diff UI.",
+  "input": {
+    "userPrompt": "Refactor this handler for reliability and testability.",
+    "baselineLabel": "user.primary.agent"
+  },
+  "expected": {
+    "collaborativeConsiderationsNonEmpty": true,
+    "transactionalConsiderationsEmpty": true,
+    "transactionalConsiderationsSuppressed": true,
+    "collaborativeConsiderationsSuppressed": false,
+    "transactionalTraceCollapsed": true,
+    "collaborativeModeLabel": "Collaborative",
+    "transactionalModeLabel": "Transactional",
+    "collaborativeModeHintAbsent": true,
+    "transactionalModeHintNonEmpty": true,
+    "collaborativeDiffAvailable": false,
+    "transactionalDiffAvailable": false
+  }
+}

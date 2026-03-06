@@ -16,6 +16,18 @@ export interface RouteExecutionOptions {
   sessionId?: string;
   engagementStance?: EngagementStance;
   taskIdFactory?: (agent: AgentRole, taskType: TaskType) => string;
+  maxAgentTasks?: number;
+}
+
+function getSimulatedFailureIds(context?: Record<string, unknown>): Set<string> {
+  const raw = context?.simulateFailureAgentIds;
+  if (!Array.isArray(raw)) {
+    return new Set<string>();
+  }
+
+  return new Set(
+    raw.filter((entry): entry is string => typeof entry === "string" && entry.length > 0),
+  );
 }
 
 function mapTagToTaskType(tag: TaskTag): TaskType {
@@ -63,8 +75,15 @@ export class AgentRouter {
     const byTag: RouterResult["byTag"] = {};
     const traceTasks: AgentTask[] = [];
     const traceResults: AgentResult[] = [];
+    let taskBudget = options?.maxAgentTasks ?? Number.MAX_SAFE_INTEGER;
+    const simulatedFailureIds = getSimulatedFailureIds(context);
 
     const tagJobs = classification.tags.map(async (tag) => {
+      if (taskBudget <= 0) {
+        byTag[tag] = [];
+        return;
+      }
+
       const agents = this.registry[tag] ?? [];
       if (agents.length === 0) {
         byTag[tag] = [];
@@ -73,7 +92,10 @@ export class AgentRouter {
 
       const taskType = mapTagToTaskType(tag);
       const role = mapTagToRole(tag);
-      const tasksForAgents = agents.map((agent, index) => {
+      const selectedAgents = agents.slice(0, taskBudget);
+      taskBudget -= selectedAgents.length;
+
+      const tasksForAgents = selectedAgents.map((agent, index) => {
         const id =
           options?.taskIdFactory?.(role, taskType) ??
           `${options?.sessionId ?? "session"}:${taskType}:${role}:${index + 1}`;
@@ -97,8 +119,14 @@ export class AgentRouter {
 
       // Isolate failures so one provider error does not collapse the whole tag.
       const settled = await Promise.allSettled(
-        tasksForAgents.map(({ agent, traceTask }) =>
-          agent.handle({
+        tasksForAgents.map(({ agent, traceTask }) => {
+          if (simulatedFailureIds.has(agent.id)) {
+            return Promise.reject(
+              new Error(`simulated failure for ${agent.id}`),
+            );
+          }
+
+          return agent.handle({
             tag,
             userMessage,
             context: {
@@ -106,8 +134,8 @@ export class AgentRouter {
               taskId: traceTask.id,
               engagementStance: options?.engagementStance,
             },
-          }),
-        ),
+          });
+        }),
       );
 
       byTag[tag] = settled.map((result, index) => {

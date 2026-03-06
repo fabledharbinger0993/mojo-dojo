@@ -3,6 +3,7 @@ import path from "node:path";
 import { generateTaskId } from "../ids";
 import { orchestrate, runSecondOpinionAudit } from "../orchestrate";
 import { EngagementStance, SecondOpinionAuditInput, UserMessage } from "../types";
+import { toAuditViewModel } from "../vscode/adapters/auditViewModel";
 
 interface AuditFixtureExpected {
   method?: string;
@@ -20,11 +21,14 @@ interface AuditFixture {
 }
 
 interface OrchestrationFixtureExpected {
+  expectedStatus?: "ok" | "partial_failure" | "failure";
   expectedTaskCount?: number;
   expectedStance?: EngagementStance;
   requireDeterministicIds?: boolean;
   requireTaskResultReferentialIntegrity?: boolean;
   requireEvaluationReferences?: boolean;
+  expectedErroredCodingResults?: number;
+  requireEvaluationExcludesErroredResults?: boolean;
 }
 
 interface OrchestrationFixture {
@@ -35,7 +39,33 @@ interface OrchestrationFixture {
   expected: OrchestrationFixtureExpected;
 }
 
-type Fixture = AuditFixture | OrchestrationFixture;
+interface StancePolicyFixtureExpected {
+  collaborativeConsiderationsNonEmpty: boolean;
+  transactionalConsiderationsEmpty: boolean;
+  transactionalConsiderationsSuppressed: boolean;
+  collaborativeConsiderationsSuppressed: boolean;
+  transactionalTraceCollapsed: boolean;
+  collaborativeModeLabel?: string;
+  transactionalModeLabel?: string;
+  collaborativeModeHintAbsent?: boolean;
+  transactionalModeHintNonEmpty?: boolean;
+  collaborativeDiffAvailable?: boolean;
+  transactionalDiffAvailable?: boolean;
+}
+
+interface StancePolicyFixture {
+  kind: "stance-policy";
+  name: string;
+  description?: string;
+  input: {
+    userPrompt: string;
+    baselineOutput?: string;
+    baselineLabel?: string;
+  };
+  expected: StancePolicyFixtureExpected;
+}
+
+type Fixture = AuditFixture | OrchestrationFixture | StancePolicyFixture;
 
 function assertIncludesAll(
   source: string,
@@ -105,9 +135,16 @@ function validateAuditFixture(
 function validateOrchestrationFixture(
   fixture: OrchestrationFixture,
   failures: string[],
+  status: Awaited<ReturnType<typeof orchestrate>>["status"],
   trace: NonNullable<Awaited<ReturnType<typeof orchestrate>>["trace"]>,
   evaluation: Awaited<ReturnType<typeof orchestrate>>["evaluation"],
 ): void {
+  if (fixture.expected.expectedStatus && status !== fixture.expected.expectedStatus) {
+    failures.push(
+      `${fixture.name}: expected status ${fixture.expected.expectedStatus}, got ${status}`,
+    );
+  }
+
   if (
     typeof fixture.expected.expectedTaskCount === "number" &&
     trace.tasks.length !== fixture.expected.expectedTaskCount
@@ -125,6 +162,19 @@ function validateOrchestrationFixture(
 
   const taskIds = trace.tasks.map((task) => task.id);
   const resultIds = trace.results.map((result) => result.id);
+  const erroredResultIds = new Set(trace.results.filter((result) => result.error).map((result) => result.id));
+  const erroredCodingResults = trace.results.filter(
+    (result) => result.taskType === "coding" && result.error,
+  );
+
+  if (
+    typeof fixture.expected.expectedErroredCodingResults === "number" &&
+    erroredCodingResults.length !== fixture.expected.expectedErroredCodingResults
+  ) {
+    failures.push(
+      `${fixture.name}: expected ${fixture.expected.expectedErroredCodingResults} errored coding result(s), got ${erroredCodingResults.length}`,
+    );
+  }
 
   if (fixture.expected.requireDeterministicIds) {
     for (let i = 0; i < trace.tasks.length; i += 1) {
@@ -165,6 +215,22 @@ function validateOrchestrationFixture(
       }
     }
   }
+
+  if (fixture.expected.requireEvaluationExcludesErroredResults && evaluation) {
+    if (erroredResultIds.has(evaluation.winnerTaskId)) {
+      failures.push(
+        `${fixture.name}: evaluation winnerTaskId ${evaluation.winnerTaskId} points to an errored result`,
+      );
+    }
+
+    for (const score of evaluation.scores) {
+      if (erroredResultIds.has(score.taskId)) {
+        failures.push(
+          `${fixture.name}: evaluation score taskId ${score.taskId} points to an errored result`,
+        );
+      }
+    }
+  }
 }
 
 async function run(): Promise<void> {
@@ -189,7 +255,160 @@ async function run(): Promise<void> {
       if (!result.trace) {
         failures.push(`${fixture.name}: expected trace to be present`);
       } else {
-        validateOrchestrationFixture(fixture, failures, result.trace, result.evaluation);
+        validateOrchestrationFixture(
+          fixture,
+          failures,
+          result.status,
+          result.trace,
+          result.evaluation,
+        );
+      }
+    } else if (fixture.kind === "stance-policy") {
+      const collaborativeMessage: UserMessage = {
+        sessionId: `${fixture.name}-collaborative`,
+        text: fixture.input.userPrompt,
+        timestamp: new Date().toISOString(),
+        context: {
+          engagementStanceOverride: "collaborative",
+        },
+      };
+
+      const transactionalMessage: UserMessage = {
+        sessionId: `${fixture.name}-transactional`,
+        text: fixture.input.userPrompt,
+        timestamp: new Date().toISOString(),
+        context: {
+          engagementStanceOverride: "transactional",
+        },
+      };
+
+      const [collaborativeResult, transactionalResult, auditResult] = await Promise.all([
+        orchestrate(collaborativeMessage),
+        orchestrate(transactionalMessage),
+        runSecondOpinionAudit({
+          userPrompt: fixture.input.userPrompt,
+          baselineOutput: fixture.input.baselineOutput,
+          baselineLabel: fixture.input.baselineLabel,
+        }),
+      ]);
+
+      const collaborativeView = toAuditViewModel(auditResult, {
+        engagementStance: collaborativeResult.trace?.engagementStance,
+        outputMode: collaborativeResult.outputPolicy.mode,
+        baselineCode: fixture.input.baselineOutput,
+        auditCode: auditResult.comparison.secondOpinion.content,
+        includeConsiderations: collaborativeResult.outputPolicy.includeConsiderations,
+        traceExpandedByDefault: collaborativeResult.outputPolicy.traceExpandedByDefault,
+      });
+
+      const transactionalView = toAuditViewModel(auditResult, {
+        engagementStance: transactionalResult.trace?.engagementStance,
+        outputMode: transactionalResult.outputPolicy.mode,
+        baselineCode: fixture.input.baselineOutput,
+        auditCode: auditResult.comparison.secondOpinion.content,
+        includeConsiderations: transactionalResult.outputPolicy.includeConsiderations,
+        traceExpandedByDefault: transactionalResult.outputPolicy.traceExpandedByDefault,
+      });
+
+      if (
+        fixture.expected.collaborativeConsiderationsNonEmpty &&
+        !(collaborativeView.considerations.length > 0)
+      ) {
+        failures.push(
+          `${fixture.name}: expected collaborative considerations.length > 0`,
+        );
+      }
+
+      if (
+        fixture.expected.transactionalConsiderationsEmpty &&
+        !(transactionalView.considerations.length === 0)
+      ) {
+        failures.push(
+          `${fixture.name}: expected transactional considerations.length === 0`,
+        );
+      }
+
+      if (
+        fixture.expected.transactionalConsiderationsSuppressed &&
+        !(transactionalView.considerationsSuppressed === true)
+      ) {
+        failures.push(
+          `${fixture.name}: expected transactional considerationsSuppressed === true`,
+        );
+      }
+
+      if (
+        fixture.expected.collaborativeConsiderationsSuppressed === false &&
+        !(collaborativeView.considerationsSuppressed === false)
+      ) {
+        failures.push(
+          `${fixture.name}: expected collaborative considerationsSuppressed === false`,
+        );
+      }
+
+      if (
+        fixture.expected.transactionalTraceCollapsed &&
+        !(transactionalView.trace.traceCollapsed === true)
+      ) {
+        failures.push(`${fixture.name}: expected transactional traceCollapsed === true`);
+      }
+
+      if (
+        fixture.expected.collaborativeModeLabel &&
+        collaborativeView.mode.label !== fixture.expected.collaborativeModeLabel
+      ) {
+        failures.push(
+          `${fixture.name}: expected collaborative mode label ${fixture.expected.collaborativeModeLabel}, got ${collaborativeView.mode.label}`,
+        );
+      }
+
+      if (
+        fixture.expected.transactionalModeLabel &&
+        transactionalView.mode.label !== fixture.expected.transactionalModeLabel
+      ) {
+        failures.push(
+          `${fixture.name}: expected transactional mode label ${fixture.expected.transactionalModeLabel}, got ${transactionalView.mode.label}`,
+        );
+      }
+
+      if (
+        fixture.expected.collaborativeModeHintAbsent &&
+        typeof collaborativeView.mode.hint === "string" &&
+        collaborativeView.mode.hint.trim().length > 0
+      ) {
+        failures.push(
+          `${fixture.name}: expected collaborative mode.hint to be absent`,
+        );
+      }
+
+      if (
+        fixture.expected.transactionalModeHintNonEmpty &&
+        !(
+          typeof transactionalView.mode.hint === "string" &&
+          transactionalView.mode.hint.trim().length > 0
+        )
+      ) {
+        failures.push(
+          `${fixture.name}: expected transactional mode.hint to be a non-empty string`,
+        );
+      }
+
+      if (
+        typeof fixture.expected.collaborativeDiffAvailable === "boolean" &&
+        collaborativeView.diffAvailable !== fixture.expected.collaborativeDiffAvailable
+      ) {
+        failures.push(
+          `${fixture.name}: expected collaborative diffAvailable ${fixture.expected.collaborativeDiffAvailable}, got ${collaborativeView.diffAvailable}`,
+        );
+      }
+
+      if (
+        typeof fixture.expected.transactionalDiffAvailable === "boolean" &&
+        transactionalView.diffAvailable !== fixture.expected.transactionalDiffAvailable
+      ) {
+        failures.push(
+          `${fixture.name}: expected transactional diffAvailable ${fixture.expected.transactionalDiffAvailable}, got ${transactionalView.diffAvailable}`,
+        );
       }
     } else {
       const result = await runSecondOpinionAudit(fixture.input);

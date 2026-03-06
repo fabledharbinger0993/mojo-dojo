@@ -107,6 +107,16 @@ Each agent in the reasoning layer operates under the Sovern framework. Users do 
 - **Congress** — performs internal deliberation between competing interpretations before responding. Makes trade-offs explicit. Exercises a hard Skeptic's Veto when user assumptions conflict with evidence or the user's own stated values.
 - **Ego** — shapes outward messages with attention to relational context and ongoing history. Distinguishes truth-telling from user appeasement. Never sacrifices coherence for comfort.
 
+### 3.5 Mode Signaling In UI
+
+Mojo-Dojo now surfaces a compact **Mode** block at the top of the panel so users can immediately see collaboration context:
+
+- `Collaborative` — full reasoning, uncertainty, and critique are enabled.
+- `Transactional` — concise mode with reduced explainability; the UI adds a gentle hint to switch to Collaborative for full reasoning signals.
+- `Boundary` — safety boundaries are active and some content is intentionally constrained.
+
+This keeps stance visible without lecturing: users can see what mode they are in and why certain signals are expanded or suppressed.
+
 ### 3.5 Interface Format
 
 The primary interface is a group-chat style conversation window inside VS Code. Each agent has a distinct label and visual identity. Messages appear individually as agents complete their work — not aggregated by the orchestrator. Users see the work happening in real time, not a laundered summary of it. This is technically similar to a Slack or Discord thread, just populated by AI services instead of people.

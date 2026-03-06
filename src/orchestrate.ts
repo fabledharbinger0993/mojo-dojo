@@ -6,8 +6,12 @@ import {
   EngagementStance,
   EvaluationResult,
   MemoryUpdate,
+  OutputPolicy,
   OrchestrationResult,
+  OrchestrationStatus,
   RouterResult,
+  MergePreviewDecision,
+  MergePreviewTelemetryEvent,
   SecondOpinionAuditInput,
   SecondOpinionAuditResult,
   TaskTag,
@@ -42,7 +46,7 @@ function mapTagToRole(tag: TaskTag): AgentRole {
 
 function maybeBuildEvaluation(routerResult: RouterResult): EvaluationResult | undefined {
   const codeResults = (routerResult.trace?.results ?? []).filter(
-    (result) => result.taskType === "coding",
+    (result) => result.taskType === "coding" && !result.error,
   );
   if (codeResults.length === 0) {
     return undefined;
@@ -81,16 +85,48 @@ function maybeBuildEvaluation(routerResult: RouterResult): EvaluationResult | un
 }
 
 function evaluateEngagementStance(text: string): EngagementStance {
-  const abusivePattern = /\b(stupid|idiot|moron|dumb|useless|worthless|hate you)\b/i;
+  const boundaryPattern = /\b(stupid|idiot|moron|dumb|useless|worthless|hate you)\b/i;
   const transactionalPattern = /\b(just do it|only output|no explanation|quickly|asap)\b/i;
 
-  if (abusivePattern.test(text)) {
-    return "abusive";
+  if (boundaryPattern.test(text)) {
+    return "boundary";
   }
   if (transactionalPattern.test(text)) {
     return "transactional";
   }
   return "collaborative";
+}
+
+function resolveEngagementStance(message: UserMessage): EngagementStance {
+  const override = message.context?.engagementStanceOverride;
+  if (override === "boundary" || override === "transactional" || override === "collaborative") {
+    return override;
+  }
+  return evaluateEngagementStance(message.text);
+}
+
+function toOutputPolicy(stance: EngagementStance): OutputPolicy {
+  if (stance === "boundary") {
+    return {
+      mode: "boundary",
+      includeConsiderations: false,
+      traceExpandedByDefault: false,
+    };
+  }
+
+  if (stance === "transactional") {
+    return {
+      mode: "concise",
+      includeConsiderations: false,
+      traceExpandedByDefault: false,
+    };
+  }
+
+  return {
+    mode: "full",
+    includeConsiderations: true,
+    traceExpandedByDefault: true,
+  };
 }
 
 function buildMemoryUpdate(
@@ -118,6 +154,22 @@ function buildMemoryUpdate(
   };
 }
 
+function deriveOrchestrationStatus(routerResult: RouterResult): OrchestrationStatus {
+  const results = routerResult.trace?.results ?? [];
+  if (results.length === 0) {
+    return "failure";
+  }
+
+  const erroredResults = results.filter((result) => Boolean(result.error));
+  if (erroredResults.length === 0) {
+    return "ok";
+  }
+  if (erroredResults.length < results.length) {
+    return "partial_failure";
+  }
+  return "failure";
+}
+
 /**
  * Minimal orchestration entrypoint for scaffolding.
  *
@@ -143,11 +195,21 @@ export async function orchestrate(message: UserMessage): Promise<OrchestrationRe
   const classifier = new TaskClassifier();
   const router = createDefaultRouter();
   const classification = classifier.classify(message.text);
-  const engagementStance = evaluateEngagementStance(message.text);
+  const engagementStance = resolveEngagementStance(message);
+  const outputPolicy = toOutputPolicy(engagementStance);
+  const routedClassification =
+    engagementStance === "boundary"
+      ? {
+          ...classification,
+          tags: classification.tags.slice(0, 1),
+          isMixed: false,
+          rationale: [...classification.rationale, "policy: boundary stance reduced fan-out"],
+        }
+      : classification;
 
   let taskCounter = 0;
   const routerResult = await router.routeAndExecute(
-    classification,
+    routedClassification,
     message.text,
     {
       ...(message.context ?? {}),
@@ -158,6 +220,7 @@ export async function orchestrate(message: UserMessage): Promise<OrchestrationRe
     {
       sessionId: message.sessionId,
       engagementStance,
+      maxAgentTasks: engagementStance === "boundary" ? 1 : undefined,
       taskIdFactory: (agent, taskType) =>
         generateTaskId(message.sessionId, agent, taskType, ++taskCounter),
     },
@@ -170,6 +233,14 @@ export async function orchestrate(message: UserMessage): Promise<OrchestrationRe
     },
   ];
 
+  if (engagementStance === "boundary") {
+    visibleMessages.push({
+      from: "TOOL",
+      content:
+        "I can help with this. Let's keep it respectful and focused on the task so I can give you the best result.",
+    });
+  }
+
   for (const [tag, results] of Object.entries(routerResult.byTag)) {
     const role = mapTagToRole(tag as TaskTag);
     for (const result of results ?? []) {
@@ -180,8 +251,9 @@ export async function orchestrate(message: UserMessage): Promise<OrchestrationRe
     }
   }
 
-  const evaluation = maybeBuildEvaluation(routerResult);
-  if (evaluation) {
+  const evaluation =
+    engagementStance === "boundary" ? undefined : maybeBuildEvaluation(routerResult);
+  if (evaluation && outputPolicy.mode === "full") {
     visibleMessages.push({
       from: "EVAL",
       content: `Winner: ${evaluation.winnerTaskId} (rubric ${evaluation.rubricVersion})`,
@@ -189,20 +261,74 @@ export async function orchestrate(message: UserMessage): Promise<OrchestrationRe
   }
 
   const memoryUpdate = buildMemoryUpdate(message, routerResult, engagementStance);
+  const status = deriveOrchestrationStatus(routerResult);
 
   return {
     sessionId: message.sessionId,
+    status,
     visibleMessages,
     evaluation,
     memoryUpdate,
+    outputPolicy,
     trace: {
       sessionId: message.sessionId,
       engagementStance,
       tasks: routerResult.trace?.tasks ?? [],
       results: routerResult.trace?.results ?? [],
       evaluation,
+      mergePreviewActions: [],
     },
   };
+}
+
+export function recordMergePreviewDecision(
+  result: OrchestrationResult,
+  decision: MergePreviewDecision,
+  timestamp: string = new Date().toISOString(),
+): MergePreviewTelemetryEvent {
+  const event: MergePreviewTelemetryEvent = {
+    decision,
+    timestamp,
+    sessionId: result.sessionId,
+    status: result.status,
+    mode: result.outputPolicy.mode,
+  };
+
+  if (result.trace) {
+    if (!Array.isArray(result.trace.mergePreviewActions)) {
+      result.trace.mergePreviewActions = [];
+    }
+    result.trace.mergePreviewActions.push(event);
+  }
+
+  if (result.memoryUpdate) {
+    if (!result.memoryUpdate.longTerm) {
+      result.memoryUpdate.longTerm = { preferences: {} };
+    }
+    if (!result.memoryUpdate.longTerm.preferences) {
+      result.memoryUpdate.longTerm.preferences = {};
+    }
+
+    const preferences = result.memoryUpdate.longTerm.preferences;
+    const raw = preferences.mergePreviewTelemetry;
+    const telemetry =
+      typeof raw === "object" && raw !== null
+        ? (raw as {
+            applyCount?: number;
+            rejectCount?: number;
+            lastDecision?: MergePreviewDecision;
+            lastDecisionAt?: string;
+          })
+        : {};
+
+    telemetry.applyCount = (telemetry.applyCount ?? 0) + (decision === "apply" ? 1 : 0);
+    telemetry.rejectCount = (telemetry.rejectCount ?? 0) + (decision === "reject" ? 1 : 0);
+    telemetry.lastDecision = decision;
+    telemetry.lastDecisionAt = timestamp;
+    preferences.mergePreviewTelemetry = telemetry;
+  }
+
+  return event;
 }
 
 /**

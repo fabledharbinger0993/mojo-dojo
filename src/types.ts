@@ -20,6 +20,8 @@ export interface UserMessage {
     filePath?: string;
     selection?: string;
     languageId?: string;
+    engagementStanceOverride?: EngagementStance;
+    simulateFailureAgentIds?: string[];
   };
 }
 
@@ -29,7 +31,7 @@ export type TaskType = "research" | "reasoning" | "coding" | "system";
 // Which logical agent is being asked to act.
 export type AgentRole = "RESEARCH" | "REASONING" | "CODE" | "TOOL" | "EVAL";
 
-export type EngagementStance = "collaborative" | "transactional" | "abusive";
+export type EngagementStance = "collaborative" | "transactional" | "boundary";
 
 // A single agent request emitted by the router.
 export interface AgentTask {
@@ -80,17 +82,37 @@ export interface MemoryUpdate {
   }>;
 }
 
+export type MergePreviewDecision = "apply" | "reject";
+
+export interface MergePreviewTelemetryEvent {
+  decision: MergePreviewDecision;
+  timestamp: string;
+  sessionId: string;
+  status: OrchestrationStatus;
+  mode: OutputPolicy["mode"];
+}
+
 // Final response shape for VS Code UI.
 export interface OrchestrationResult {
   sessionId: string;
+  status: OrchestrationStatus;
   visibleMessages: Array<{
     from: AgentRole | "USER";
     content: string;
   }>;
   evaluation?: EvaluationResult;
   memoryUpdate?: MemoryUpdate;
+  outputPolicy: OutputPolicy;
   trace?: OrchestrationTrace;
 }
+
+export interface OutputPolicy {
+  mode: "boundary" | "concise" | "full";
+  includeConsiderations: boolean;
+  traceExpandedByDefault: boolean;
+}
+
+export type OrchestrationStatus = "ok" | "partial_failure" | "failure";
 
 export interface OrchestrationTrace {
   sessionId: string;
@@ -98,6 +120,7 @@ export interface OrchestrationTrace {
   tasks: AgentTask[];
   results: AgentResult[];
   evaluation?: EvaluationResult;
+  mergePreviewActions?: MergePreviewTelemetryEvent[];
 }
 
 export interface RouterTrace {

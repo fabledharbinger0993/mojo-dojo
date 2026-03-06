@@ -1,0 +1,26 @@
+{
+  "kind": "orchestration",
+  "name": "orchestration-partial-failure-resilience",
+  "description": "One code agent fails while others succeed; trace integrity holds and evaluation excludes errored outputs.",
+  "input": {
+    "sessionId": "fixture-session-005",
+    "userId": "fixture-user",
+    "text": "Implement a safe API handler with retries and tests.",
+    "timestamp": "2026-01-01T00:00:00.000Z",
+    "context": {
+      "languageId": "typescript",
+      "simulateFailureAgentIds": [
+        "code.grok"
+      ]
+    }
+  },
+  "expected": {
+    "expectedStatus": "partial_failure",
+    "expectedTaskCount": 3,
+    "expectedStance": "collaborative",
+    "requireTaskResultReferentialIntegrity": true,
+    "requireEvaluationReferences": true,
+    "expectedErroredCodingResults": 1,
+    "requireEvaluationExcludesErroredResults": true
+  }
+}

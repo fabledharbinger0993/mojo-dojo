@@ -1,0 +1,23 @@
+{
+  "kind": "stance-policy",
+  "name": "stance-policy-transactional-vs-collaborative",
+  "description": "Same prompt should produce different output shape between transactional and collaborative stance policies.",
+  "input": {
+    "userPrompt": "Implement robust retry logic with tests and explain your trade-offs.",
+    "baselineLabel": "user.primary.agent",
+    "baselineOutput": "Use retries and tests."
+  },
+  "expected": {
+    "collaborativeConsiderationsNonEmpty": true,
+    "transactionalConsiderationsEmpty": true,
+    "transactionalConsiderationsSuppressed": true,
+    "collaborativeConsiderationsSuppressed": false,
+    "transactionalTraceCollapsed": true,
+    "collaborativeModeLabel": "Collaborative",
+    "transactionalModeLabel": "Transactional",
+    "collaborativeModeHintAbsent": true,
+    "transactionalModeHintNonEmpty": true,
+    "collaborativeDiffAvailable": true,
+    "transactionalDiffAvailable": true
+  }
+}

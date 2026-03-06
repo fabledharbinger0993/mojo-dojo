@@ -10,7 +10,8 @@
   "activationEvents": [
     "onCommand:mojoDojo.runSecondOpinionAudit",
     "onCommand:mojoDojo.secondOpinion",
-    "onCommand:mojoDojo.auditThis"
+    "onCommand:mojoDojo.auditThis",
+    "onCommand:mojoDojo.showMergeStats"
   ],
   "contributes": {
     "commands": [
@@ -28,13 +29,20 @@
         "command": "mojoDojo.auditThis",
         "title": "Mojo-Dojo: Audit This",
         "category": "Mojo-Dojo"
+      },
+      {
+        "command": "mojoDojo.showMergeStats",
+        "title": "Mojo-Dojo: Show Merge Stats",
+        "category": "Mojo-Dojo"
       }
     ]
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "test": "npm run build && npm run fixtures:audit && npm run fixtures:orchestration",
     "fixtures:audit": "node dist/tools/runAuditFixtures.js",
-    "fixtures:audit:local": "npm run build && npm run fixtures:audit",
+    "fixtures:orchestration": "node dist/tools/runOrchestrationDeterminism.js",
+    "fixtures:audit:local": "npm run test",
     "vscode:prepublish": "npm run build",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
