@@ -1,5 +1,5 @@
 import { RoutedAgent } from "../interfaces";
-import { AgentResult, AgentTask } from "../../types";
+import { LegacyAgentResult, LegacyAgentTask } from "../../types";
 
 /**
  * Grok code-generation wrapper.
@@ -12,7 +12,7 @@ export class GrokCodeAgent implements RoutedAgent {
   readonly role = "code" as const;
   readonly modelName = "Grok";
 
-  async handle(task: AgentTask): Promise<AgentResult> {
+  async handle(task: LegacyAgentTask): Promise<LegacyAgentResult> {
     // TODO: Wire Grok endpoint, credentials, and model variant.
     return {
       agentId: this.id,

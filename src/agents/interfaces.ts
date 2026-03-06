@@ -1,4 +1,4 @@
-import { AgentResult, AgentTask, TaskTag } from "../types";
+import { LegacyAgentResult, LegacyAgentTask, TaskTag } from "../types";
 
 /**
  * Common pluggable agent contract.
@@ -11,5 +11,5 @@ export interface RoutedAgent {
   id: string;
   role: TaskTag;
   modelName: string;
-  handle(task: AgentTask): Promise<AgentResult>;
+  handle(task: LegacyAgentTask): Promise<LegacyAgentResult>;
 }

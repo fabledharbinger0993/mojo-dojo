@@ -1,5 +1,5 @@
 import { RoutedAgent } from "../interfaces";
-import { AgentResult, AgentTask } from "../../types";
+import { LegacyAgentResult, LegacyAgentTask } from "../../types";
 
 /**
  * Gemini + Docker system/tool wrapper.
@@ -13,7 +13,7 @@ export class GeminiSystemAgent implements RoutedAgent {
   readonly role = "system_action" as const;
   readonly modelName = "Gemini";
 
-  async handle(task: AgentTask): Promise<AgentResult> {
+  async handle(task: LegacyAgentTask): Promise<LegacyAgentResult> {
     // TODO: Wire Gemini model endpoint and tool-calling permissions.
     // TODO: Integrate Docker command executor with sandbox and policy checks.
     return {

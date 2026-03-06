@@ -1,7 +1,48 @@
 import { RoutedAgent } from "../agents/interfaces";
-import { ClassificationResult, RouterResult, TaskTag } from "../types";
+import {
+  AgentRole,
+  AgentResult,
+  AgentTask,
+  ClassificationResult,
+  EngagementStance,
+  RouterResult,
+  TaskTag,
+  TaskType,
+} from "../types";
 
 export type AgentRegistry = Partial<Record<TaskTag, RoutedAgent[]>>;
+
+export interface RouteExecutionOptions {
+  sessionId?: string;
+  engagementStance?: EngagementStance;
+  taskIdFactory?: (agent: AgentRole, taskType: TaskType) => string;
+}
+
+function mapTagToTaskType(tag: TaskTag): TaskType {
+  if (tag === "research") {
+    return "research";
+  }
+  if (tag === "reasoning") {
+    return "reasoning";
+  }
+  if (tag === "code") {
+    return "coding";
+  }
+  return "system";
+}
+
+function mapTagToRole(tag: TaskTag): AgentRole {
+  if (tag === "research") {
+    return "RESEARCH";
+  }
+  if (tag === "reasoning") {
+    return "REASONING";
+  }
+  if (tag === "code") {
+    return "CODE";
+  }
+  return "TOOL";
+}
 
 /**
  * AgentRouter dispatches classified tasks to specialist model adapters.
@@ -17,8 +58,11 @@ export class AgentRouter {
     classification: ClassificationResult,
     userMessage: string,
     context?: Record<string, unknown>,
+    options?: RouteExecutionOptions,
   ): Promise<RouterResult> {
     const byTag: RouterResult["byTag"] = {};
+    const traceTasks: AgentTask[] = [];
+    const traceResults: AgentResult[] = [];
 
     const tagJobs = classification.tags.map(async (tag) => {
       const agents = this.registry[tag] ?? [];
@@ -27,27 +71,75 @@ export class AgentRouter {
         return;
       }
 
+      const taskType = mapTagToTaskType(tag);
+      const role = mapTagToRole(tag);
+      const tasksForAgents = agents.map((agent, index) => {
+        const id =
+          options?.taskIdFactory?.(role, taskType) ??
+          `${options?.sessionId ?? "session"}:${taskType}:${role}:${index + 1}`;
+
+        const traceTask: AgentTask = {
+          id,
+          sessionId: options?.sessionId ?? "session",
+          agent: role,
+          taskType,
+          prompt: userMessage,
+          metadata: {
+            routedTag: tag,
+            routedAgentId: agent.id,
+            engagementStance: options?.engagementStance ?? "collaborative",
+          },
+        };
+
+        traceTasks.push(traceTask);
+        return { agent, traceTask };
+      });
+
       // Isolate failures so one provider error does not collapse the whole tag.
       const settled = await Promise.allSettled(
-        agents.map((agent) =>
+        tasksForAgents.map(({ agent, traceTask }) =>
           agent.handle({
             tag,
             userMessage,
-            context,
+            context: {
+              ...(context ?? {}),
+              taskId: traceTask.id,
+              engagementStance: options?.engagementStance,
+            },
           }),
         ),
       );
 
       byTag[tag] = settled.map((result, index) => {
+        const traceTask = tasksForAgents[index]?.traceTask;
+
         if (result.status === "fulfilled") {
+          traceResults.push({
+            id: traceTask?.id ?? `${tag}:${index + 1}`,
+            agent: traceTask?.agent ?? role,
+            taskType: traceTask?.taskType ?? taskType,
+            content: result.value.content,
+            error: undefined,
+          });
           return result.value;
         }
 
-        const failedAgent = agents[index];
+        const failedAgent = tasksForAgents[index]?.agent;
+        const errorMessage =
+          result.reason instanceof Error ? result.reason.message : "unknown error";
+
+        traceResults.push({
+          id: traceTask?.id ?? `${tag}:${index + 1}`,
+          agent: traceTask?.agent ?? role,
+          taskType: traceTask?.taskType ?? taskType,
+          content: `[error] ${errorMessage}`,
+          error: errorMessage,
+        });
+
         return {
           agentId: failedAgent?.id ?? `${tag}.unknown`,
           tag,
-          content: `[error] agent failed: ${result.reason instanceof Error ? result.reason.message : "unknown error"}`,
+          content: `[error] agent failed: ${errorMessage}`,
           metadata: {
             error: true,
             provider: failedAgent?.modelName ?? "unknown",
@@ -58,9 +150,21 @@ export class AgentRouter {
 
     await Promise.all(tagJobs);
 
+    const taskOrder = new Map(traceTasks.map((task, index) => [task.id, index]));
+    traceResults.sort((a, b) => {
+      const aIndex = taskOrder.get(a.id) ?? Number.MAX_SAFE_INTEGER;
+      const bIndex = taskOrder.get(b.id) ?? Number.MAX_SAFE_INTEGER;
+      return aIndex - bIndex;
+    });
+
     return {
       classification,
       byTag,
+      trace: {
+        sessionId: options?.sessionId,
+        tasks: traceTasks,
+        results: traceResults,
+      },
     };
   }
 }

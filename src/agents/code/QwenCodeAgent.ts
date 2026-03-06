@@ -1,5 +1,5 @@
 import { RoutedAgent } from "../interfaces";
-import { AgentResult, AgentTask } from "../../types";
+import { LegacyAgentResult, LegacyAgentTask } from "../../types";
 
 /**
  * Qwen code-generation wrapper for ensemble coding.
@@ -12,7 +12,7 @@ export class QwenCodeAgent implements RoutedAgent {
   readonly role = "code" as const;
   readonly modelName = "Qwen";
 
-  async handle(task: AgentTask): Promise<AgentResult> {
+  async handle(task: LegacyAgentTask): Promise<LegacyAgentResult> {
     // TODO: Wire Qwen provider endpoint and auth secret.
     return {
       agentId: this.id,

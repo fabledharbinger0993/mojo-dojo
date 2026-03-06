@@ -1,0 +1,21 @@
+{
+  "kind": "orchestration",
+  "name": "orchestration-trace-referential-integrity",
+  "description": "Trace should use deterministic task IDs and preserve task/result/evaluation referential integrity.",
+  "input": {
+    "sessionId": "fixture-session-003",
+    "userId": "fixture-user",
+    "text": "Explain trade-offs and implement tests for this API handler.",
+    "timestamp": "2026-01-01T00:00:00.000Z",
+    "context": {
+      "languageId": "typescript"
+    }
+  },
+  "expected": {
+    "expectedTaskCount": 5,
+    "expectedStance": "collaborative",
+    "requireDeterministicIds": true,
+    "requireTaskResultReferentialIntegrity": true,
+    "requireEvaluationReferences": true
+  }
+}

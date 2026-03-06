@@ -1,5 +1,5 @@
 import { RoutedAgent } from "../interfaces";
-import { AgentResult, AgentTask } from "../../types";
+import { LegacyAgentResult, LegacyAgentTask } from "../../types";
 
 /**
  * ChatGPT reasoning wrapper.
@@ -12,7 +12,7 @@ export class ChatGPTReasoningAgent implements RoutedAgent {
   readonly role = "reasoning" as const;
   readonly modelName = "ChatGPT";
 
-  async handle(task: AgentTask): Promise<AgentResult> {
+  async handle(task: LegacyAgentTask): Promise<LegacyAgentResult> {
     const env =
       (globalThis as { process?: { env?: Record<string, string | undefined> } }).process
         ?.env ?? {};

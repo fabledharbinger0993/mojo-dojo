@@ -1,5 +1,5 @@
 import { RoutedAgent } from "../interfaces";
-import { AgentResult, AgentTask } from "../../types";
+import { LegacyAgentResult, LegacyAgentTask } from "../../types";
 
 /**
  * Haiku code-generation wrapper.
@@ -12,7 +12,7 @@ export class HaikuCodeAgent implements RoutedAgent {
   readonly role = "code" as const;
   readonly modelName = "Haiku";
 
-  async handle(task: AgentTask): Promise<AgentResult> {
+  async handle(task: LegacyAgentTask): Promise<LegacyAgentResult> {
     // TODO: Wire Haiku provider and secret management.
     return {
       agentId: this.id,

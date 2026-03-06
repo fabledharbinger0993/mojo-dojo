@@ -1,6 +1,18 @@
 import { TaskClassifier } from "./classifier/TaskClassifier";
 import { createDefaultRouter } from "./router/createDefaultRouter";
-import { RouterResult, SecondOpinionAuditInput, SecondOpinionAuditResult } from "./types";
+import { generateTaskId } from "./ids";
+import {
+  AgentRole,
+  EngagementStance,
+  EvaluationResult,
+  MemoryUpdate,
+  OrchestrationResult,
+  RouterResult,
+  SecondOpinionAuditInput,
+  SecondOpinionAuditResult,
+  TaskTag,
+  UserMessage,
+} from "./types";
 import { reframePrompt } from "./audit/reframePrompt";
 import { compareBids } from "./audit/scoreBids";
 import { inferStyleHintsFromWorkspace } from "./audit/inferStyleHints";
@@ -13,6 +25,97 @@ function extractStyleHints(context?: Record<string, unknown>): string | undefine
 
   const joined = [styleGuide, naming, existing].filter((entry) => entry.length > 0).join("; ");
   return joined.length > 0 ? joined : undefined;
+}
+
+function mapTagToRole(tag: TaskTag): AgentRole {
+  if (tag === "research") {
+    return "RESEARCH";
+  }
+  if (tag === "reasoning") {
+    return "REASONING";
+  }
+  if (tag === "code") {
+    return "CODE";
+  }
+  return "TOOL";
+}
+
+function maybeBuildEvaluation(routerResult: RouterResult): EvaluationResult | undefined {
+  const codeResults = (routerResult.trace?.results ?? []).filter(
+    (result) => result.taskType === "coding",
+  );
+  if (codeResults.length === 0) {
+    return undefined;
+  }
+
+  const scores = codeResults.map((result) => {
+    const hasCodeBlock = /```[\s\S]*```/.test(result.content);
+    const mentionsTests = /\b(test|unit test|integration)\b/i.test(result.content);
+    const mentionsRisk = /\b(risk|error|fallback|security)\b/i.test(result.content);
+
+    let score = 0.4;
+    if (hasCodeBlock) {
+      score += 0.25;
+    }
+    if (mentionsTests) {
+      score += 0.2;
+    }
+    if (mentionsRisk) {
+      score += 0.15;
+    }
+
+    return {
+      taskId: result.id,
+      score: Math.min(1, score),
+      rationale: `code-block=${hasCodeBlock}, tests=${mentionsTests}, risk-aware=${mentionsRisk}`,
+    };
+  });
+
+  const winner = scores.reduce((best, current) => (current.score > best.score ? current : best));
+
+  return {
+    winnerTaskId: winner.taskId,
+    scores,
+    rubricVersion: "dojo-eval-v0.1",
+  };
+}
+
+function evaluateEngagementStance(text: string): EngagementStance {
+  const abusivePattern = /\b(stupid|idiot|moron|dumb|useless|worthless|hate you)\b/i;
+  const transactionalPattern = /\b(just do it|only output|no explanation|quickly|asap)\b/i;
+
+  if (abusivePattern.test(text)) {
+    return "abusive";
+  }
+  if (transactionalPattern.test(text)) {
+    return "transactional";
+  }
+  return "collaborative";
+}
+
+function buildMemoryUpdate(
+  message: UserMessage,
+  routerResult: RouterResult,
+  engagementStance?: EngagementStance,
+): MemoryUpdate {
+  const agentMessages = Object.values(routerResult.byTag)
+    .flatMap((results) => results ?? [])
+    .map((result) => ({ from: "agent" as const, content: result.content }));
+
+  return {
+    sessionId: message.sessionId,
+    shortTerm: {
+      messages: [{ from: "user", content: message.text }, ...agentMessages],
+    },
+    longTerm: {
+      notes: routerResult.classification.rationale.join(" | "),
+      preferences: {
+        languageId: message.context?.languageId,
+        filePath: message.context?.filePath,
+        engagementStance,
+      },
+    },
+  };
 }
 
 /**
@@ -30,6 +133,76 @@ export async function orchestrateUserMessage(
 
   const classification = classifier.classify(userMessage);
   return router.routeAndExecute(classification, userMessage, context);
+}
+
+/**
+ * README-aligned orchestration contract entrypoint:
+ * User -> Classifier -> Router -> Specialist Models -> Evaluation -> Memory -> Response
+ */
+export async function orchestrate(message: UserMessage): Promise<OrchestrationResult> {
+  const classifier = new TaskClassifier();
+  const router = createDefaultRouter();
+  const classification = classifier.classify(message.text);
+  const engagementStance = evaluateEngagementStance(message.text);
+
+  let taskCounter = 0;
+  const routerResult = await router.routeAndExecute(
+    classification,
+    message.text,
+    {
+      ...(message.context ?? {}),
+      sessionId: message.sessionId,
+      userId: message.userId,
+      timestamp: message.timestamp,
+    },
+    {
+      sessionId: message.sessionId,
+      engagementStance,
+      taskIdFactory: (agent, taskType) =>
+        generateTaskId(message.sessionId, agent, taskType, ++taskCounter),
+    },
+  );
+
+  const visibleMessages: OrchestrationResult["visibleMessages"] = [
+    {
+      from: "USER",
+      content: message.text,
+    },
+  ];
+
+  for (const [tag, results] of Object.entries(routerResult.byTag)) {
+    const role = mapTagToRole(tag as TaskTag);
+    for (const result of results ?? []) {
+      visibleMessages.push({
+        from: role,
+        content: result.content,
+      });
+    }
+  }
+
+  const evaluation = maybeBuildEvaluation(routerResult);
+  if (evaluation) {
+    visibleMessages.push({
+      from: "EVAL",
+      content: `Winner: ${evaluation.winnerTaskId} (rubric ${evaluation.rubricVersion})`,
+    });
+  }
+
+  const memoryUpdate = buildMemoryUpdate(message, routerResult, engagementStance);
+
+  return {
+    sessionId: message.sessionId,
+    visibleMessages,
+    evaluation,
+    memoryUpdate,
+    trace: {
+      sessionId: message.sessionId,
+      engagementStance,
+      tasks: routerResult.trace?.tasks ?? [],
+      results: routerResult.trace?.results ?? [],
+      evaluation,
+    },
+  };
 }
 
 /**

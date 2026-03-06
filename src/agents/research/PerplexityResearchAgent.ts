@@ -1,5 +1,5 @@
 import { RoutedAgent } from "../interfaces";
-import { AgentResult, AgentTask } from "../../types";
+import { LegacyAgentResult, LegacyAgentTask } from "../../types";
 
 /**
  * Perplexity wrapper for retrieval-heavy requests.
@@ -12,7 +12,7 @@ export class PerplexityResearchAgent implements RoutedAgent {
   readonly role = "research" as const;
   readonly modelName = "Perplexity";
 
-  async handle(task: AgentTask): Promise<AgentResult> {
+  async handle(task: LegacyAgentTask): Promise<LegacyAgentResult> {
     // TODO: Wire Perplexity API client and token from secure configuration.
     // TODO: Return citation-rich response payload from provider.
     return {

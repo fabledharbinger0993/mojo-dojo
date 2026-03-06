@@ -1,5 +1,5 @@
 import { RoutedAgent } from "../interfaces";
-import { AgentResult, AgentTask } from "../../types";
+import { LegacyAgentResult, LegacyAgentTask } from "../../types";
 
 /**
  * Claude reasoning wrapper.
@@ -12,7 +12,7 @@ export class ClaudeReasoningAgent implements RoutedAgent {
   readonly role = "reasoning" as const;
   readonly modelName = "Claude";
 
-  async handle(task: AgentTask): Promise<AgentResult> {
+  async handle(task: LegacyAgentTask): Promise<LegacyAgentResult> {
     // TODO: Wire Anthropic/Claude client and model selection policy.
     return {
       agentId: this.id,

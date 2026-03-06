@@ -10,20 +10,116 @@ export const TASK_TAGS = ["research", "reasoning", "code", "system_action"] as c
 
 export type TaskTag = (typeof TASK_TAGS)[number];
 
+// What the VS Code extension sends into the orchestrator.
+export interface UserMessage {
+  sessionId: string;
+  userId?: string;
+  text: string;
+  timestamp: string;
+  context?: {
+    filePath?: string;
+    selection?: string;
+    languageId?: string;
+  };
+}
+
+// High-level task intent decided by the classifier.
+export type TaskType = "research" | "reasoning" | "coding" | "system";
+
+// Which logical agent is being asked to act.
+export type AgentRole = "RESEARCH" | "REASONING" | "CODE" | "TOOL" | "EVAL";
+
+export type EngagementStance = "collaborative" | "transactional" | "abusive";
+
+// A single agent request emitted by the router.
+export interface AgentTask {
+  id: string;
+  sessionId: string;
+  agent: AgentRole;
+  taskType: TaskType;
+  prompt: string;
+  metadata?: Record<string, unknown>;
+}
+
+// Raw response from a specialist model.
+export interface AgentResult {
+  id: string;
+  agent: AgentRole;
+  taskType: TaskType;
+  content: string;
+  tokensUsed?: number;
+  latencyMs?: number;
+  error?: string;
+}
+
+// Structured evaluation output for ensemble code tasks.
+export interface EvaluationResult {
+  winnerTaskId: string;
+  scores: Array<{
+    taskId: string;
+    score: number;
+    rationale: string;
+  }>;
+  rubricVersion: string;
+}
+
+// Memory updates emitted after each turn.
+export interface MemoryUpdate {
+  sessionId: string;
+  shortTerm?: {
+    messages: Array<{ from: "user" | "agent"; content: string }>;
+  };
+  longTerm?: {
+    notes?: string;
+    preferences?: Record<string, unknown>;
+  };
+  vectorEmbeddings?: Array<{
+    id: string;
+    embedding: number[];
+    metadata?: Record<string, unknown>;
+  }>;
+}
+
+// Final response shape for VS Code UI.
+export interface OrchestrationResult {
+  sessionId: string;
+  visibleMessages: Array<{
+    from: AgentRole | "USER";
+    content: string;
+  }>;
+  evaluation?: EvaluationResult;
+  memoryUpdate?: MemoryUpdate;
+  trace?: OrchestrationTrace;
+}
+
+export interface OrchestrationTrace {
+  sessionId: string;
+  engagementStance: EngagementStance;
+  tasks: AgentTask[];
+  results: AgentResult[];
+  evaluation?: EvaluationResult;
+}
+
+export interface RouterTrace {
+  sessionId?: string;
+  tasks: AgentTask[];
+  results: AgentResult[];
+}
+
 export interface ClassificationResult {
   tags: TaskTag[];
   isMixed: boolean;
   rationale: string[];
 }
 
-export interface AgentTask {
+export interface LegacyAgentTask {
   tag: TaskTag;
   userMessage: string;
   sessionId?: string;
   context?: Record<string, unknown>;
 }
 
-export interface AgentResult {
+export interface LegacyAgentResult {
   agentId: string;
   tag: TaskTag;
   content: string;
@@ -32,7 +128,8 @@ export interface AgentResult {
 
 export interface RouterResult {
   classification: ClassificationResult;
-  byTag: Partial<Record<TaskTag, AgentResult[]>>;
+  byTag: Partial<Record<TaskTag, LegacyAgentResult[]>>;
+  trace?: RouterTrace;
 }
 
 export interface PromptReframe {
