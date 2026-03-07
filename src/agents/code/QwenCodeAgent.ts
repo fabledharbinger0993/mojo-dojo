@@ -1,5 +1,5 @@
-import { RoutedAgent } from "../interfaces";
-import { LegacyAgentResult, LegacyAgentTask } from "../../types";
+import { ReasoningAgent } from "../interfaces";
+import { AgentResult, AgentTask, OrchestrationContext } from "../../types";
 
 /**
  * Qwen code-generation wrapper for ensemble coding.
@@ -7,18 +7,18 @@ import { LegacyAgentResult, LegacyAgentTask } from "../../types";
  * The dojo architecture compares multiple code candidates before selecting a
  * winner through evaluation; this wrapper exists to keep that path pluggable.
  */
-export class QwenCodeAgent implements RoutedAgent {
+export class QwenCodeAgent implements ReasoningAgent {
   readonly id = "code.qwen";
-  readonly role = "code" as const;
-  readonly modelName = "Qwen";
+  readonly roles = ["CODE"] as const;
 
-  async handle(task: LegacyAgentTask): Promise<LegacyAgentResult> {
+  async run(task: AgentTask, _context: OrchestrationContext): Promise<AgentResult> {
     // TODO: Wire Qwen provider endpoint and auth secret.
     return {
-      agentId: this.id,
-      tag: this.role,
-      content: `[stub] Qwen would generate code for: ${task.userMessage}`,
-      metadata: { provider: this.modelName },
+      id: task.id,
+      agent: task.agent,
+      taskType: task.taskType,
+      content: `[stub] Qwen would generate code for: ${task.prompt}`,
+      metadata: { agent: "qwen", provider: "qwen" },
     };
   }
 }

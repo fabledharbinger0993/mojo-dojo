@@ -1,5 +1,5 @@
-import { RoutedAgent } from "../interfaces";
-import { LegacyAgentResult, LegacyAgentTask } from "../../types";
+import { ReasoningAgent } from "../interfaces";
+import { AgentResult, AgentTask, OrchestrationContext } from "../../types";
 
 /**
  * Perplexity wrapper for retrieval-heavy requests.
@@ -7,19 +7,19 @@ import { LegacyAgentResult, LegacyAgentTask } from "../../types";
  * In the dojo, RESEARCH outputs should be source-oriented so downstream
  * reasoning remains transparent and reviewable by users and evaluators.
  */
-export class PerplexityResearchAgent implements RoutedAgent {
+export class PerplexityResearchAgent implements ReasoningAgent {
   readonly id = "research.perplexity";
-  readonly role = "research" as const;
-  readonly modelName = "Perplexity";
+  readonly roles = ["RESEARCH"] as const;
 
-  async handle(task: LegacyAgentTask): Promise<LegacyAgentResult> {
+  async run(task: AgentTask, _context: OrchestrationContext): Promise<AgentResult> {
     // TODO: Wire Perplexity API client and token from secure configuration.
     // TODO: Return citation-rich response payload from provider.
     return {
-      agentId: this.id,
-      tag: this.role,
-      content: `[stub] Perplexity would research: ${task.userMessage}`,
-      metadata: { provider: this.modelName, citations: [] },
+      id: task.id,
+      agent: task.agent,
+      taskType: task.taskType,
+      content: `[stub] Perplexity would research: ${task.prompt}`,
+      metadata: { agent: "perplexity", provider: "perplexity", citations: [] },
     };
   }
 }

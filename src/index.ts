@@ -1,6 +1,8 @@
 export { TaskClassifier } from "./classifier/TaskClassifier";
 export { AgentRouter } from "./router/AgentRouter";
 export { createDefaultRouter } from "./router/createDefaultRouter";
+export { createMockRouter } from "./router/createMockRouter";
+export { AgentRegistry, createDefaultAgentRegistry } from "./agents/AgentRegistry";
 export {
   orchestrate,
   orchestrateUserMessage,
@@ -21,6 +23,7 @@ export type {
   OutputPolicy,
   OrchestrationStatus,
   OrchestrationResult,
+  OrchestrationRuntimeConfig,
   UserMessage,
   TaskType,
   AuditBidComparison,

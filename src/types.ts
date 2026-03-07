@@ -16,6 +16,7 @@ export interface UserMessage {
   userId?: string;
   text: string;
   timestamp: string;
+  runtimeConfig?: OrchestrationRuntimeConfig;
   context?: {
     filePath?: string;
     selection?: string;
@@ -43,6 +44,43 @@ export interface AgentTask {
   metadata?: Record<string, unknown>;
 }
 
+export interface ProviderRuntimeConfig {
+  apiKey?: string;
+  endpoint?: string;
+  model?: string;
+  timeoutMs?: number;
+  maxRetries?: number;
+}
+
+export interface OrchestrationRuntimeConfig {
+  useMockAgents?: boolean;
+  registryEntries?: Array<{
+    id: string;
+    provider: string;
+    roles: readonly AgentRole[];
+    adapterClass: string;
+    apiKeyEnv: string;
+    priority: number;
+    timeoutMs: number;
+    maxConcurrency?: number;
+    enabled: boolean;
+  }>;
+  providers?: {
+    chatgpt?: ProviderRuntimeConfig;
+    claude?: ProviderRuntimeConfig;
+    perplexity?: ProviderRuntimeConfig;
+  };
+}
+
+export interface OrchestrationContext {
+  prompt: string;
+  timeoutMs: number;
+  sharedMemory?: Record<string, unknown>;
+  previousAgentOutputs?: AgentResult[];
+  requestContext?: Record<string, unknown>;
+  config?: OrchestrationRuntimeConfig;
+}
+
 // Raw response from a specialist model.
 export interface AgentResult {
   id: string;
@@ -52,6 +90,7 @@ export interface AgentResult {
   tokensUsed?: number;
   latencyMs?: number;
   error?: string;
+  metadata?: Record<string, unknown>;
 }
 
 // Structured evaluation output for ensemble code tasks.
@@ -218,6 +257,7 @@ export interface SecondOpinionAuditInput {
   userPrompt: string;
   baselineOutput?: string;
   baselineLabel?: string;
+  runtimeConfig?: OrchestrationRuntimeConfig;
   context?: Record<string, unknown>;
 }
 

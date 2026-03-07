@@ -13,6 +13,9 @@ async function run(): Promise<void> {
     userId: "determinism-user",
     text: "Please explain trade-offs and implement unit tests for this API handler.",
     timestamp: "2026-01-01T00:00:00.000Z",
+    runtimeConfig: {
+      useMockAgents: true,
+    },
     context: {
       languageId: "typescript",
       filePath: "src/example.ts",

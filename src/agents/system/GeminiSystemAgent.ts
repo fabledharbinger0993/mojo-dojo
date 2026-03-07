@@ -1,5 +1,5 @@
-import { RoutedAgent } from "../interfaces";
-import { LegacyAgentResult, LegacyAgentTask } from "../../types";
+import { ReasoningAgent } from "../interfaces";
+import { AgentResult, AgentTask, OrchestrationContext } from "../../types";
 
 /**
  * Gemini + Docker system/tool wrapper.
@@ -8,19 +8,19 @@ import { LegacyAgentResult, LegacyAgentTask } from "../../types";
  * adapter is where tool invocation traces can later be captured for memory and
  * safety review.
  */
-export class GeminiSystemAgent implements RoutedAgent {
+export class GeminiSystemAgent implements ReasoningAgent {
   readonly id = "system.gemini";
-  readonly role = "system_action" as const;
-  readonly modelName = "Gemini";
+  readonly roles = ["TOOL"] as const;
 
-  async handle(task: LegacyAgentTask): Promise<LegacyAgentResult> {
+  async run(task: AgentTask, _context: OrchestrationContext): Promise<AgentResult> {
     // TODO: Wire Gemini model endpoint and tool-calling permissions.
     // TODO: Integrate Docker command executor with sandbox and policy checks.
     return {
-      agentId: this.id,
-      tag: this.role,
-      content: `[stub] Gemini+Docker would execute system action for: ${task.userMessage}`,
-      metadata: { provider: this.modelName, tools: ["docker"] },
+      id: task.id,
+      agent: task.agent,
+      taskType: task.taskType,
+      content: `[stub] Gemini+Docker would execute system action for: ${task.prompt}`,
+      metadata: { agent: "gemini", provider: "google", tools: ["docker"] },
     };
   }
 }

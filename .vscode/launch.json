@@ -13,6 +13,22 @@
         "${workspaceFolder}/dist/**/*.js"
       ],
       "preLaunchTask": "npm: build"
+    },
+    {
+      "name": "Run Mojo-Dojo Extension (Mock)",
+      "type": "extensionHost",
+      "request": "launch",
+      "runtimeExecutable": "${execPath}",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}"
+      ],
+      "env": {
+        "MOJO_USE_MOCK_AGENTS": "true"
+      },
+      "outFiles": [
+        "${workspaceFolder}/dist/**/*.js"
+      ],
+      "preLaunchTask": "npm: build"
     }
   ]
 }

@@ -39,7 +39,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "npm run build && npm run fixtures:audit && npm run fixtures:orchestration",
+    "test": "npm run build && npm run test:claude-adapter && npm run fixtures:audit && npm run fixtures:orchestration",
+    "test:claude-adapter": "node dist/tools/runClaudeAdapterMockTest.js",
     "fixtures:audit": "node dist/tools/runAuditFixtures.js",
     "fixtures:orchestration": "node dist/tools/runOrchestrationDeterminism.js",
     "fixtures:audit:local": "npm run test",

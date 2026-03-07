@@ -20,8 +20,13 @@ function scoreText(content: string | undefined, styleHints?: string): AuditBidSc
   const testSignals = Number(/\b(test|unit test|integration|coverage)\b/i.test(text)) * 15;
   const styleFitSignals = scoreStyleFitSignals(text, styleHints);
 
+  // Penalize confident-but-unverified phrasing that lacks concrete proof signals.
+  const overconfidenceSignals = Number(/\b(should work|probably works?|trust me|quick refactor)\b/i.test(text)) * 20;
+
   const reliabilityPenalty =
-    Number(/\[(stub|error|fallback)\]/i.test(text)) * 25 + Number(text.length < 60) * 10;
+    Number(/\[(stub|error|fallback)\]/i.test(text)) * 25 +
+    Number(text.length < 60) * 10 +
+    overconfidenceSignals;
 
   const total = Math.max(
     0,
@@ -234,12 +239,17 @@ function buildConsiderations(
     );
   }
 
-  if (secondOpinion.reliabilityPenalty > baseline.reliabilityPenalty) {
-    notes.push("Audit result has more fallback/error signals; validate reliability before full replacement.");
+  if (secondOpinion.reliabilityPenalty > 0) {
+    notes.push("Audit result has fallback/error markers; validate reliability before full replacement.");
   }
 
   if ((styleHints ?? "").trim().length === 0) {
     notes.push("No style hints were provided; style-fit criterion is currently low-confidence.");
+  }
+
+  // Keep reliability review explicit in every comparison so merge choices consider failure paths.
+  if (!notes.some((note) => /\bfallback\b/i.test(note))) {
+    notes.push("Verify fallback behavior before merge to reduce downstream incident risk.");
   }
 
   if (notes.length === 0) {

@@ -1,22 +1,31 @@
-import { RoutedAgent } from "../agents/interfaces";
+import { ReasoningAgent } from "../agents/interfaces";
 import {
-  AgentRole,
   AgentResult,
+  AgentRole,
   AgentTask,
   ClassificationResult,
   EngagementStance,
+  LegacyAgentResult,
+  OrchestrationContext,
+  OrchestrationRuntimeConfig,
   RouterResult,
   TaskTag,
   TaskType,
 } from "../types";
-
-export type AgentRegistry = Partial<Record<TaskTag, RoutedAgent[]>>;
+import { AgentRegistry, AgentRegistryEntry } from "../agents/AgentRegistry";
 
 export interface RouteExecutionOptions {
   sessionId?: string;
   engagementStance?: EngagementStance;
   taskIdFactory?: (agent: AgentRole, taskType: TaskType) => string;
   maxAgentTasks?: number;
+}
+
+interface AgentRouterOptions {
+  runtimeConfig?: OrchestrationRuntimeConfig;
+  registry?: AgentRegistry;
+  agentsById?: Record<string, ReasoningAgent>;
+  staticAgentsByTag?: Partial<Record<TaskTag, ReasoningAgent[]>>;
 }
 
 function getSimulatedFailureIds(context?: Record<string, unknown>): Set<string> {
@@ -56,15 +65,71 @@ function mapTagToRole(tag: TaskTag): AgentRole {
   return "TOOL";
 }
 
+class ConcurrencyLimiter {
+  private readonly inFlight = new Map<string, number>();
+
+  canRun(agentId: string, maxConcurrency?: number): boolean {
+    const current = this.inFlight.get(agentId) ?? 0;
+    if (!maxConcurrency || maxConcurrency <= 0) {
+      return true;
+    }
+    return current < maxConcurrency;
+  }
+
+  start(agentId: string): void {
+    this.inFlight.set(agentId, (this.inFlight.get(agentId) ?? 0) + 1);
+  }
+
+  finish(agentId: string): void {
+    const current = this.inFlight.get(agentId) ?? 0;
+    if (current <= 1) {
+      this.inFlight.delete(agentId);
+      return;
+    }
+    this.inFlight.set(agentId, current - 1);
+  }
+}
+
 /**
- * AgentRouter dispatches classified tasks to specialist model adapters.
- *
- * This is the core of the dojo's multi-agent transparency: every routed tag
- * can fan out to one or more agents, making reasoning and code alternatives
- * visible for later evaluation and memory indexing.
+ * Registry-driven router with optional static-agent mode for deterministic mocks.
  */
 export class AgentRouter {
-  constructor(private readonly registry: AgentRegistry) {}
+  private readonly concurrency = new ConcurrencyLimiter();
+
+  constructor(private readonly options: AgentRouterOptions) {}
+
+  private selectAgentsForTag(tag: TaskTag): Array<{ entry: AgentRegistryEntry; agent: ReasoningAgent }> {
+    if (this.options.staticAgentsByTag) {
+      const staticAgents = this.options.staticAgentsByTag[tag] ?? [];
+      return staticAgents.map((agent, index) => ({
+        entry: {
+          id: agent.id,
+          provider: "mock",
+          roles: agent.roles,
+          adapterClass: agent.constructor.name,
+          apiKeyEnv: "",
+          priority: 100 - index,
+          timeoutMs: 12000,
+          maxConcurrency: 8,
+          enabled: true,
+        },
+        agent,
+      }));
+    }
+
+    const role = mapTagToRole(tag);
+    const entries = this.options.registry?.findEnabledByRole(role) ?? [];
+
+    const selected: Array<{ entry: AgentRegistryEntry; agent: ReasoningAgent }> = [];
+    for (const entry of entries) {
+      const agent = this.options.agentsById?.[entry.id];
+      if (agent) {
+        selected.push({ entry, agent });
+      }
+    }
+
+    return selected;
+  }
 
   async routeAndExecute(
     classification: ClassificationResult,
@@ -84,18 +149,18 @@ export class AgentRouter {
         return;
       }
 
-      const agents = this.registry[tag] ?? [];
-      if (agents.length === 0) {
+      const taskType = mapTagToTaskType(tag);
+      const role = mapTagToRole(tag);
+      const agentBindings = this.selectAgentsForTag(tag);
+      if (agentBindings.length === 0) {
         byTag[tag] = [];
         return;
       }
 
-      const taskType = mapTagToTaskType(tag);
-      const role = mapTagToRole(tag);
-      const selectedAgents = agents.slice(0, taskBudget);
-      taskBudget -= selectedAgents.length;
+      const selectedBindings = agentBindings.slice(0, taskBudget);
+      taskBudget -= selectedBindings.length;
 
-      const tasksForAgents = selectedAgents.map((agent, index) => {
+      const tasksForAgents = selectedBindings.map(({ agent, entry }, index) => {
         const id =
           options?.taskIdFactory?.(role, taskType) ??
           `${options?.sessionId ?? "session"}:${taskType}:${role}:${index + 1}`;
@@ -110,67 +175,109 @@ export class AgentRouter {
             routedTag: tag,
             routedAgentId: agent.id,
             engagementStance: options?.engagementStance ?? "collaborative",
+            provider: entry.provider,
           },
         };
 
         traceTasks.push(traceTask);
-        return { agent, traceTask };
+        return { agent, entry, traceTask };
       });
 
-      // Isolate failures so one provider error does not collapse the whole tag.
       const settled = await Promise.allSettled(
-        tasksForAgents.map(({ agent, traceTask }) => {
+        tasksForAgents.map(async ({ agent, entry, traceTask }) => {
           if (simulatedFailureIds.has(agent.id)) {
-            return Promise.reject(
-              new Error(`simulated failure for ${agent.id}`),
-            );
+            throw new Error(`simulated failure for ${agent.id}`);
           }
 
-          return agent.handle({
-            tag,
-            userMessage,
-            context: {
-              ...(context ?? {}),
-              taskId: traceTask.id,
-              engagementStance: options?.engagementStance,
-            },
-          });
+          if (!this.concurrency.canRun(agent.id, entry.maxConcurrency)) {
+            return {
+              skipped: true,
+              result: {
+                id: traceTask.id,
+                agent: traceTask.agent,
+                taskType: traceTask.taskType,
+                content: `[fallback] ${agent.id} skipped due to maxConcurrency limit.`,
+                error: "max-concurrency",
+                metadata: {
+                  agent: agent.id,
+                  provider: entry.provider,
+                  live: false,
+                  skipped: true,
+                },
+              } satisfies AgentResult,
+            };
+          }
+
+          this.concurrency.start(agent.id);
+          try {
+            const orchestrationContext: OrchestrationContext = {
+              prompt: userMessage,
+              timeoutMs: entry.timeoutMs,
+              requestContext: context,
+              previousAgentOutputs: traceResults,
+            };
+
+            const result = await agent.run(traceTask, orchestrationContext);
+            return { skipped: false, result };
+          } finally {
+            this.concurrency.finish(agent.id);
+          }
         }),
       );
 
-      byTag[tag] = settled.map((result, index) => {
+      byTag[tag] = settled.map((settledResult, index) => {
         const traceTask = tasksForAgents[index]?.traceTask;
+        const entry = tasksForAgents[index]?.entry;
 
-        if (result.status === "fulfilled") {
-          traceResults.push({
-            id: traceTask?.id ?? `${tag}:${index + 1}`,
-            agent: traceTask?.agent ?? role,
-            taskType: traceTask?.taskType ?? taskType,
-            content: result.value.content,
-            error: undefined,
-          });
-          return result.value;
+        if (settledResult.status === "fulfilled") {
+          const mapped: AgentResult = {
+            id: traceTask?.id ?? settledResult.value.result.id,
+            agent: traceTask?.agent ?? settledResult.value.result.agent,
+            taskType: traceTask?.taskType ?? settledResult.value.result.taskType,
+            content: settledResult.value.result.content,
+            error: settledResult.value.result.error,
+            latencyMs: settledResult.value.result.latencyMs,
+            tokensUsed: settledResult.value.result.tokensUsed,
+            metadata: settledResult.value.result.metadata,
+          };
+
+          traceResults.push(mapped);
+
+          const legacy: LegacyAgentResult = {
+            agentId: tasksForAgents[index]?.agent.id ?? `${tag}.unknown`,
+            tag,
+            content: mapped.content,
+            metadata: {
+              ...(mapped.metadata ?? {}),
+              error: mapped.error,
+            },
+          };
+          return legacy;
         }
 
-        const failedAgent = tasksForAgents[index]?.agent;
         const errorMessage =
-          result.reason instanceof Error ? result.reason.message : "unknown error";
+          settledResult.reason instanceof Error ? settledResult.reason.message : "unknown error";
 
-        traceResults.push({
+        const errored: AgentResult = {
           id: traceTask?.id ?? `${tag}:${index + 1}`,
           agent: traceTask?.agent ?? role,
           taskType: traceTask?.taskType ?? taskType,
           content: `[error] ${errorMessage}`,
           error: errorMessage,
-        });
+          metadata: {
+            provider: entry?.provider ?? "unknown",
+            live: false,
+          },
+        };
 
+        traceResults.push(errored);
         return {
-          agentId: failedAgent?.id ?? `${tag}.unknown`,
+          agentId: tasksForAgents[index]?.agent.id ?? `${tag}.unknown`,
           tag,
           content: `[error] agent failed: ${errorMessage}`,
           metadata: {
             error: true,
-            provider: failedAgent?.modelName ?? "unknown",
+            provider: entry?.provider ?? "unknown",
           },
         };
       });

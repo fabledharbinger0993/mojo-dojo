@@ -1,4 +1,9 @@
-import { LegacyAgentResult, LegacyAgentTask, TaskTag } from "../types";
+import {
+  AgentResult,
+  AgentRole,
+  AgentTask,
+  OrchestrationContext,
+} from "../types";
 
 /**
  * Common pluggable agent contract.
@@ -7,9 +12,8 @@ import { LegacyAgentResult, LegacyAgentTask, TaskTag } from "../types";
  * preserving dojo goals: visible multi-agent contributions, comparable outputs
  * for evaluation, and structured artifacts for memory updates.
  */
-export interface RoutedAgent {
+export interface ReasoningAgent {
   id: string;
-  role: TaskTag;
-  modelName: string;
-  handle(task: LegacyAgentTask): Promise<LegacyAgentResult>;
+  roles: readonly AgentRole[];
+  run(task: AgentTask, context: OrchestrationContext): Promise<AgentResult>;
 }

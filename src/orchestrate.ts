@@ -1,5 +1,6 @@
 import { TaskClassifier } from "./classifier/TaskClassifier";
 import { createDefaultRouter } from "./router/createDefaultRouter";
+import { createMockRouter } from "./router/createMockRouter";
 import { generateTaskId } from "./ids";
 import {
   AgentRole,
@@ -8,6 +9,7 @@ import {
   MemoryUpdate,
   OutputPolicy,
   OrchestrationResult,
+  OrchestrationRuntimeConfig,
   OrchestrationStatus,
   RouterResult,
   MergePreviewDecision,
@@ -29,6 +31,14 @@ function extractStyleHints(context?: Record<string, unknown>): string | undefine
 
   const joined = [styleGuide, naming, existing].filter((entry) => entry.length > 0).join("; ");
   return joined.length > 0 ? joined : undefined;
+}
+
+function createRouter(runtimeConfig?: OrchestrationRuntimeConfig) {
+  if (runtimeConfig?.useMockAgents) {
+    return createMockRouter();
+  }
+
+  return createDefaultRouter(runtimeConfig);
 }
 
 function mapTagToRole(tag: TaskTag): AgentRole {
@@ -170,30 +180,21 @@ function deriveOrchestrationStatus(routerResult: RouterResult): OrchestrationSta
   return "failure";
 }
 
-/**
- * Minimal orchestration entrypoint for scaffolding.
- *
- * This demonstrates dojo flow: classify -> route to multiple agents -> return
- * structured outputs that later stages can evaluate and commit to memory.
- */
 export async function orchestrateUserMessage(
   userMessage: string,
   context?: Record<string, unknown>,
+  runtimeConfig?: OrchestrationRuntimeConfig,
 ): Promise<RouterResult> {
   const classifier = new TaskClassifier();
-  const router = createDefaultRouter();
+  const router = createRouter(runtimeConfig);
 
   const classification = classifier.classify(userMessage);
   return router.routeAndExecute(classification, userMessage, context);
 }
 
-/**
- * README-aligned orchestration contract entrypoint:
- * User -> Classifier -> Router -> Specialist Models -> Evaluation -> Memory -> Response
- */
 export async function orchestrate(message: UserMessage): Promise<OrchestrationResult> {
   const classifier = new TaskClassifier();
-  const router = createDefaultRouter();
+  const router = createRouter(message.runtimeConfig);
   const classification = classifier.classify(message.text);
   const engagementStance = resolveEngagementStance(message);
   const outputPolicy = toOutputPolicy(engagementStance);
@@ -331,17 +332,11 @@ export function recordMergePreviewDecision(
   return event;
 }
 
-/**
- * Runs a "second opinion" pass using a collaboration-oriented prompt reframe.
- *
- * This enables the product angle: users can compare baseline output from any
- * coding assistant against dojo-generated alternatives and choose what to merge.
- */
 export async function runSecondOpinionAudit(
   input: SecondOpinionAuditInput,
 ): Promise<SecondOpinionAuditResult> {
   const classifier = new TaskClassifier();
-  const router = createDefaultRouter();
+  const router = createRouter(input.runtimeConfig);
 
   const reframe = reframePrompt(input.userPrompt);
   const classification = classifier.classify(reframe.collaborativePrompt);

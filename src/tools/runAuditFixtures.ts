@@ -2,8 +2,15 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { generateTaskId } from "../ids";
 import { orchestrate, runSecondOpinionAudit } from "../orchestrate";
-import { EngagementStance, SecondOpinionAuditInput, UserMessage } from "../types";
+import {
+  EngagementStance,
+  OrchestrationRuntimeConfig,
+  SecondOpinionAuditInput,
+  UserMessage,
+} from "../types";
 import { toAuditViewModel } from "../vscode/adapters/auditViewModel";
+
+const MOCK_RUNTIME_CONFIG: OrchestrationRuntimeConfig = { useMockAgents: true };
 
 interface AuditFixtureExpected {
   method?: string;
@@ -251,7 +258,10 @@ async function run(): Promise<void> {
     const beforeCount = failures.length;
 
     if (fixture.kind === "orchestration") {
-      const result = await orchestrate(fixture.input);
+      const result = await orchestrate({
+        ...fixture.input,
+        runtimeConfig: MOCK_RUNTIME_CONFIG,
+      });
       if (!result.trace) {
         failures.push(`${fixture.name}: expected trace to be present`);
       } else {
@@ -271,6 +281,7 @@ async function run(): Promise<void> {
         context: {
           engagementStanceOverride: "collaborative",
         },
+        runtimeConfig: MOCK_RUNTIME_CONFIG,
       };
 
       const transactionalMessage: UserMessage = {
@@ -280,6 +291,7 @@ async function run(): Promise<void> {
         context: {
           engagementStanceOverride: "transactional",
         },
+        runtimeConfig: MOCK_RUNTIME_CONFIG,
       };
 
       const [collaborativeResult, transactionalResult, auditResult] = await Promise.all([
@@ -289,6 +301,7 @@ async function run(): Promise<void> {
           userPrompt: fixture.input.userPrompt,
           baselineOutput: fixture.input.baselineOutput,
           baselineLabel: fixture.input.baselineLabel,
+          runtimeConfig: MOCK_RUNTIME_CONFIG,
         }),
       ]);
 
@@ -411,7 +424,10 @@ async function run(): Promise<void> {
         );
       }
     } else {
-      const result = await runSecondOpinionAudit(fixture.input);
+      const result = await runSecondOpinionAudit({
+        ...fixture.input,
+        runtimeConfig: MOCK_RUNTIME_CONFIG,
+      });
       validateAuditFixture(fixture, failures, result.comparison);
     }
 

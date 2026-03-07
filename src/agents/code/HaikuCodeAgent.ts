@@ -1,5 +1,5 @@
-import { RoutedAgent } from "../interfaces";
-import { LegacyAgentResult, LegacyAgentTask } from "../../types";
+import { ReasoningAgent } from "../interfaces";
+import { AgentResult, AgentTask, OrchestrationContext } from "../../types";
 
 /**
  * Haiku code-generation wrapper.
@@ -7,18 +7,18 @@ import { LegacyAgentResult, LegacyAgentTask } from "../../types";
  * This model can serve as a lightweight candidate or evaluator in later stages;
  * keeping it as a first-class agent keeps ensemble logic easy to test.
  */
-export class HaikuCodeAgent implements RoutedAgent {
+export class HaikuCodeAgent implements ReasoningAgent {
   readonly id = "code.haiku";
-  readonly role = "code" as const;
-  readonly modelName = "Haiku";
+  readonly roles = ["CODE"] as const;
 
-  async handle(task: LegacyAgentTask): Promise<LegacyAgentResult> {
+  async run(task: AgentTask, _context: OrchestrationContext): Promise<AgentResult> {
     // TODO: Wire Haiku provider and secret management.
     return {
-      agentId: this.id,
-      tag: this.role,
-      content: `[stub] Haiku would generate code for: ${task.userMessage}`,
-      metadata: { provider: this.modelName },
+      id: task.id,
+      agent: task.agent,
+      taskType: task.taskType,
+      content: `[stub] Haiku would generate code for: ${task.prompt}`,
+      metadata: { agent: "haiku", provider: "haiku" },
     };
   }
 }

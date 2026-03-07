@@ -1,9 +1,13 @@
 import * as vscode from "vscode";
+import { promises as fs } from "node:fs";
+import path from "node:path";
 import {
   orchestrate,
   recordMergePreviewDecision,
   runSecondOpinionAudit,
 } from "../../orchestrate";
+import { OrchestrationRuntimeConfig, SecondOpinionAuditResult } from "../../types";
+import { createDefaultAgentRegistry } from "../../agents/AgentRegistry";
 import { toAuditViewModel } from "../adapters/auditViewModel";
 import { renderAuditPanel } from "../panels/renderAuditPanel";
 
@@ -12,6 +16,103 @@ interface MergeStats {
   reject: number;
   lastDecision?: "apply" | "reject";
   lastDecisionAt?: string;
+}
+
+const FIRST_LIVE_AUDIT_CAPTURED_KEY = "mojoDojo.firstLiveAuditCaptured";
+
+function buildOrchestrationConfig(): OrchestrationRuntimeConfig {
+  const cfg = vscode.workspace.getConfiguration("mojoDojo");
+
+  const useMockAgents = cfg.get<boolean>("useMockAgents") ?? false;
+  const reasoningTimeoutMs = cfg.get<number>("reasoningTimeoutMs") ?? 12000;
+  const reasoningModel = cfg.get<string>("reasoningModel") ?? "gpt-4.1-mini";
+  const claudeModel = cfg.get<string>("claudeModel") ?? "claude-3-5-haiku-latest";
+  const openAiEndpoint = cfg.get<string>("openAiEndpoint");
+  const claudeEndpoint = cfg.get<string>("claudeEndpoint");
+
+  return {
+    useMockAgents,
+    registryEntries: createDefaultAgentRegistry().getEntries(),
+    providers: {
+      chatgpt: {
+        apiKey: process.env.OPENAI_API_KEY ?? process.env.GITHUB_TOKEN,
+        endpoint: openAiEndpoint,
+        model: reasoningModel,
+        timeoutMs: reasoningTimeoutMs,
+        maxRetries: 1,
+      },
+      claude: {
+        apiKey: process.env.ANTHROPIC_API_KEY,
+        endpoint: claudeEndpoint,
+        model: claudeModel,
+        timeoutMs: reasoningTimeoutMs,
+        maxRetries: 1,
+      },
+      perplexity: {
+        apiKey: process.env.PERPLEXITY_API_KEY,
+      },
+    },
+  };
+}
+
+function hasLiveClaudeResult(auditResult: SecondOpinionAuditResult): boolean {
+  const reasoningResults = auditResult.secondOpinion.byTag.reasoning ?? [];
+  return reasoningResults.some((result) => {
+    const metadata = result.metadata;
+    if (!metadata || typeof metadata !== "object") {
+      return false;
+    }
+
+    const provider = (metadata as Record<string, unknown>).provider;
+    const agent = (metadata as Record<string, unknown>).agent;
+    const live = (metadata as Record<string, unknown>).live;
+    return provider === "anthropic" && agent === "claude" && live === true;
+  });
+}
+
+async function persistFirstRealAudit(
+  extensionContext: vscode.ExtensionContext,
+  auditResult: SecondOpinionAuditResult,
+  runtimeConfig: OrchestrationRuntimeConfig,
+  workspaceRoot?: string,
+): Promise<void> {
+  const alreadyCaptured =
+    extensionContext.workspaceState.get<boolean>(FIRST_LIVE_AUDIT_CAPTURED_KEY) ?? false;
+
+  if (
+    alreadyCaptured ||
+    runtimeConfig.useMockAgents ||
+    !workspaceRoot ||
+    !hasLiveClaudeResult(auditResult)
+  ) {
+    return;
+  }
+
+  const outputDir = path.join(workspaceRoot, ".mojo-dojo");
+  const timestamp = new Date().toISOString().replaceAll(":", "-");
+  const outputFile = path.join(outputDir, `first-real-audit-${timestamp}.json`);
+
+  const payload = {
+    capturedAt: new Date().toISOString(),
+    baselineLabel: auditResult.baselineLabel,
+    baselineOutput: auditResult.baselineOutput,
+    prompt: auditResult.reframe.originalPrompt,
+    collaborativePrompt: auditResult.reframe.collaborativePrompt,
+    winnerLabel: auditResult.comparison.winnerLabel,
+    winnerReason: auditResult.comparison.winnerReason,
+    criteria: auditResult.comparison.criteria,
+    considerations: auditResult.comparison.considerations,
+    secondOpinionContent: auditResult.comparison.secondOpinion.content,
+    secondOpinionScore: auditResult.comparison.secondOpinion.score,
+    baselineScore: auditResult.comparison.baseline.score,
+  };
+
+  await fs.mkdir(outputDir, { recursive: true });
+  await fs.writeFile(outputFile, JSON.stringify(payload, null, 2), "utf8");
+  await extensionContext.workspaceState.update(FIRST_LIVE_AUDIT_CAPTURED_KEY, true);
+  void vscode.window.showInformationMessage(
+    `Saved first live Claude audit: ${path.relative(workspaceRoot, outputFile)}`,
+  );
 }
 
 function readMergeStats(context: vscode.ExtensionContext): MergeStats {
@@ -71,19 +172,24 @@ async function runAuditFlow(context: vscode.ExtensionContext): Promise<void> {
   const activeEditor = vscode.window.activeTextEditor;
   const activeSelection = activeEditor?.document.getText(activeEditor.selection).trim() ?? "";
   const activeFileText = activeEditor?.document.getText().trim() ?? "";
+  const runtimeConfig = buildOrchestrationConfig();
 
   const auditResult = await runSecondOpinionAudit({
     userPrompt,
     baselineOutput: baselineOutput?.trim() || undefined,
+    runtimeConfig,
     context: {
       workspaceRoot,
     },
   });
 
+  await persistFirstRealAudit(context, auditResult, runtimeConfig, workspaceRoot);
+
   const orchestrationResult = await orchestrate({
     sessionId: `audit-${Date.now()}`,
     text: userPrompt,
     timestamp: new Date().toISOString(),
+    runtimeConfig,
     context: {
       filePath: activeEditor?.document.uri.fsPath,
       selection: activeEditor?.document.getText(activeEditor.selection),
